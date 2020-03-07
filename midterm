@@ -1,0 +1,183 @@
+### Read Training Data
+midtermtrain <- read.table(file = "http://www2.isye.gatech.edu/~ymei/7406/midtermtrain.csv", sep=",");
+
+### Some example plots for exploratory data analysis
+### please add more exploratory analysis 
+X1 <- midtermtrain[,1];
+X2 <- midtermtrain[,2];
+
+## note that muhat = E(Y) and Vhat = Var(Y)
+##
+muhat <- apply(midtermtrain[,3:202], 1, mean);
+Vhat  <- apply(midtermtrain[,3:202], 1, var);
+
+## we can plot 4 graphs in a single plot
+par(mfrow = c(2, 2));
+plot(X1, muhat); 
+plot(X2, muhat); 
+plot(X1, Vhat); 
+plot(X2, Vhat);
+
+## now plot the lines one by one for each fixed X2
+flag <- which(data0$X2 == 0);
+plot(data0[flag,1], data0[flag, 3], type="l",
+     xlim=range(data0$X1), ylim=range(data0$muhat), xlab="X1", ylab="muhat");
+for (j in 1:99){
+  flag <- which(data0$X2 == 0.01*j);
+  lines(data0[flag,1], data0[flag, 3]);
+}
+
+
+# My fitting method
+scatterplot3d(X1, X2, muhat, highlight.3d = TRUE, angle = 120, col.axis = "blue", col.grid = "lightblue", cex.axis = 1.3, cex.lab = 1.1, pch = 20)
+scatterplot3d(X1, X2, Vhat, highlight.3d = TRUE, angle = 120, col.axis = "blue", col.grid = "lightblue", cex.axis = 1.3, cex.lab = 1.1, pch = 20)
+
+
+#I want to use LOWESS method (locally weighted polynomial regression)
+
+#try the LOWESS method
+fit <- loess(muhat ~ X1 + X2, span = 0.09)
+
+#Dataframe
+
+f <- data.frame(X1,X2,muhat)
+g <- data.frame(X1,X2,Vhat)
+
+#Cross Validation of mean
+s = seq(from = 0.01, to = 0.09, by = 0.01)
+k = 10 # 10 folders
+foldid <-sample(rep(1:k, length = 10000))
+for(i in 1:k) {
+  # Fit, predict, and calculate error for each bandwidth
+  cv.error <- sapply(s, function(span) {
+    # Fit LOESS model to training set
+    obj <- loess(muhat ~ X1 + X2,
+                 data = subset(f, foldid != i),
+                 span = span,
+                 control = loess.control(surface = 'direct'))
+    # Predict and calculate error on the validation set
+    y.hat <- predict(obj, newdata = subset(f, foldid == i))
+    pse <- mean((subset(f, foldid == i)$muhat - y.hat)^2)
+    return(pse)
+  }) 
+}
+
+## qplot(s, cv.error.estimate, geom=c('line', 'point'), xlab='span')
+## Smoother selected by cross-validation
+## s.best <- s[which.min(cv.error.estimate)]
+# then we get span = 0.09
+
+#Cross Validation of variance
+s = seq(from = 0.1, to = 0.9, by = 0.1)
+k = 10 # 10 folders
+foldid <-sample(rep(1:k, length = 10000))
+for(i in 1:k) {
+  # Fit, predict, and calculate error for each bandwidth
+  cv.error <- sapply(s, function(span) {
+    # Fit LOESS model to training set
+    obj <- loess(Vhat ~ X1 + X2,
+                 data = subset(g, foldid != i),
+                 span = span,
+                 control = loess.control(surface = 'direct'))
+    # Predict and calculate error on the validation set
+    y.hat <- predict(obj, newdata = subset(g, foldid == i))
+    pse <- mean((subset(g, foldid == i)$Vhat - y.hat)^2)
+    return(pse)
+  }) 
+}
+
+s1 = seq(from = 0.01, to = 0.09, by = 0.01)
+k = 10 # 10 folders
+foldid <-sample(rep(1:k, length = 10000))
+for(i in 1:k) {
+  # Fit, predict, and calculate error for each bandwidth
+  cv.error1 <- sapply(s1, function(span) {
+    # Fit LOESS model to training set
+    obj <- loess(Vhat ~ X1 + X2,
+                 data = subset(g, foldid != i),
+                 span = span,
+                 control = loess.control(surface = 'direct'))
+    # Predict and calculate error on the validation set
+    y.hat <- predict(obj, newdata = subset(g, foldid == i))
+    pse <- mean((subset(g, foldid == i)$Vhat - y.hat)^2)
+    return(pse)
+  }) 
+}
+
+
+## Testing Data
+midtermtest  <- read.table(file = "http://www2.isye.gatech.edu/~ymei/7406/midtermtest.csv", sep=",");
+
+V1 = midtermtest$V1
+V2 = midtermtest$V2
+
+# Random Forest
+library(randomForest)
+library(mlbench)
+library(caret)
+library(rpart)
+
+cvForest1=train(muhat~X1+X2,data=data0,method='rf',ntree=100,
+                trControl=trControl,tuneGrid=tuneGrid)
+#RMSE was used to select the optimal model using the smallest value.
+#The final value used for the model was mtry = 2
+cvForest2=train(Vhat~X1+X2,data=data0,method='rf',ntree=100,
+                trControl=trControl,tuneGrid=tuneGrid)
+#RMSE was used to select the optimal model using the smallest value.
+#The final value used for the model was mtry = 1
+
+#
+mu_mod=randomForest(muhat~X1+X2,data=data0,mtry=2,importance=TRUE)
+mu_pred=predict(mu_mod,data.frame(X1,X2))
+mu_MSE=mean((mu_pred-muhat)^2)
+
+
+
+control <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
+rf_random <- train(muhat~., data=f, method="rf", metric=metric, tuneLength=15, trControl=control)
+print(rf_random)
+control <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
+rf_random <- train(Vhat~., data=f, method="rf", metric=metric, tuneLength=15, trControl=control)
+print(rf_random)
+# train model
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+# tune RF
+fit1 <- tuneRF(f, muhat, stepFactor=1.5, improve=1e-5, ntree=500)
+fit2 <- tuneRF(g, muhat, stepFactor=1.5, improve=1e-5, ntree=500)
+print(fit1)
+
+#Interpolation
+fit11 <- loess(muhat ~ X1 + X2, span = 0.09)
+pre11 <- predict(fit11, data.frame(X1=V1,X2=V2), se = TRUE)
+#write.table(pre1$fit, file="C:/Users/lenovo/Desktop/inter.csv", sep=",",  col.name=F, row.name=F)
+
+
+#Extrapolation
+fit12 <- loess(muhat ~ X1 + X2, span = 0.09, control = loess.control(surface = "direct"))
+pre12 <- predict(fit12, data.frame(X1=V1,X2=V2), se = TRUE)
+#write.table(pre2$fit, file="C:/Users/lenovo/Desktop/extra.csv", sep=",",  col.name=F, row.name=F)
+
+
+## Testing Data
+midtermtest  <- read.table(file = "http://www2.isye.gatech.edu/~ymei/7406/midtermtest.csv", sep=",");
+
+V1 = midtermtest$V1
+V2 = midtermtest$V2
+
+#Interpolation
+fit21 <- loess(Vhat ~ X1 + X2, span = 0.07)
+pre21 <- predict(fit21, data.frame(X1=V1,X2=V2), se = TRUE)
+#write.table(pre1$fit, file="C:/Users/lenovo/Desktop/intervar.csv", sep=",",  col.name=F, row.name=F)
+
+
+#Extrapolation
+fit22 <- loess(Vhat ~ X1 + X2, span = 0.07, control = loess.control(surface = "direct"))
+pre22 <- predict(fit22, data.frame(X1=V1,X2=V2), se = TRUE)
+#write.table(pre2$fit, file="C:/Users/lenovo/Desktop/extravar.csv", sep=",",  col.name=F, row.name=F)
+
+#interpolation
+testdata1 = data.frame(X1 = V1, X2=V2, muhat = round(pre11$fit,6), Vhat = round(pre21$fit,6));
+#extrapolation
+testdata2 = data.frame(X1 = V1, X2=V2, muhat = round(pre12$fit,6), Vhat = round(pre22$fit,6));
+write.table(testdata1, file="C:/Users/lenovo/Desktop/testdata1.csv", sep=",",  col.name=F, row.name=F)
+write.table(testdata2, file="C:/Users/lenovo/Desktop/testdata2.csv", sep=",",  col.name=F, row.name=F)
